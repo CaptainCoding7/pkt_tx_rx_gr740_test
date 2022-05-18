@@ -31,7 +31,7 @@
 #define SPW_PROT_ID 155
 
 /* Number of SpaceWire ports supported */
-#define DEVS_MAX 32
+#define DEVS_MAX 4 //32
 
 #include <rtems.h>
 
@@ -378,22 +378,12 @@ int dma_process(struct grspw_device *dev);
 
 rtems_task test_app(rtems_task_argument ignored)
 {
-	int i, quit;
+	int i, nb_pkts_to_transmit;
 	struct grspw_pkt *pkt;
-	int rx_ready, rx_sched, rx_recv, tx_send, tx_sched, tx_sent, tx_hwcnt, rx_hwcnt;
-	struct grspw_stats stats;
-	int tc;
 	struct route_entry route;
 
 	int src_port, dest_port;
-
-	char in_buf[128];
-	int in_buf_pos = 0;
-	int newtoken, word;
-	char *words[32];
-	int command, devno;
-	struct grspw_link_state state;
-	int clkdiv;
+	int devno;
 
 	/* Initialize two GRSPW AMBA ports */
 	printf("Setting up SpaceWire router\n");
@@ -446,176 +436,54 @@ rtems_task test_app(rtems_task_argument ignored)
 	rtems_task_start(tid_dma, dma_task, 0);
 	rtems_task_wake_after(12);
 
-	printf("Starting Packet processing loop. Enter Command:\n\n");
-	quit = 0;
-	command = 1;
-	while (quit == 0) {
-		rtems_task_wake_after(10);
 
-		if (command == 1) {
-#if 0
-			printf("> ");
-			fflush(stdout);
-#endif
-			command = 0;
+	printf("\n***********  PKT TX/RX TEST  **************\n\n");
+
+	devno = -1;
+	src_port = 3;
+	dest_port = 6;
+	/// The number of packets to transmit
+	nb_pkts_to_transmit=4;
+
+	memset(&route, 0, sizeof(route));
+	route.dstadr[0]=src_port;
+	route.dstadr[1]=dest_port;
+
+	printf("SPW src port : %d\n", route.dstadr[0]);
+	printf("SPW dest port : %d\n", route.dstadr[1]);
+	printf("%d pkts are waiting for transmission\n", nb_pkts_to_transmit);
+
+
+	while(nb_pkts_to_transmit!=0)
+	{
+
+		// the device used is changed as a new packet is sent
+		//devno = nb_pkts_to_transmit%4;
+		devno++;
+		printf("TX on GRSPW device %d (AMBA port %d)\n", devno, devno+1);
+
+		rtems_task_wake_after(100);
+
+		/* Get a TX packet buffer */
+		rtems_semaphore_obtain(dma_sem, RTEMS_WAIT, RTEMS_NO_TIMEOUT);
+		pkt = devs[devno].tx_buf_list.head;
+		if (pkt == NULL) {
+			printf(" No free transmit buffers available\n");
 		}
+		devs[devno].tx_buf_list.head = pkt->next;
+		devs[devno].tx_buf_list_cnt--;
+		if (pkt->next == NULL)
+			devs[devno].tx_buf_list.tail = NULL;
+		pkt_init_hdr(pkt, &route, devno);
 
-		/* Parse input */
-		while (read(STDIN_FILENO, &in_buf[in_buf_pos], 1) == 1) {
-			if ((in_buf[in_buf_pos] == '\n') || (in_buf[in_buf_pos] == '\r')) {
-				if (in_buf_pos > 0) {
-					in_buf[in_buf_pos] = '\0';
-					command = 1;
-					break;
-				}
-			} else
-				in_buf_pos++;
-		}
+		printf(" \nX%d: scheduling packet on GRSPW%d\n\n",
+			devno, devno);
+		nb_pkts_to_transmit--;
 
-		/* if one line of input completed then execute it */
-		if (command == 0)
-			continue;
-
-		/* Parse buffer into words */
-		newtoken = 1;
-		word = 0;
-		for (i = 0; i < in_buf_pos; i++) {
-			if ((in_buf[i] == ' ') || (in_buf[i] == '\t')) {
-				in_buf[i] = '\0';
-				newtoken = 1;
-				continue;
-			}
-
-			/* process one word */
-			if (newtoken) {
-				words[word++] = &in_buf[i];
-				newtoken = 0;
-			}
-		}
-		in_buf_pos = 0;
-
-		/* Parse words to a command */
-		if (word < 1) {
-			printf(" invalid command\n");
-			continue;
-		}
-
-		switch (*words[0]) {
-
-			default:
-				printf(" UNSUPPORTED COMMAND\n");
-			case 'h':
-			case 'H':
-				printf(" c   - Set SpaceWire clock divisor\n");
-				printf(" h   - HELP\n");
-				printf(" i   - Hardware information\n");
-				printf(" l   - Link and port setup & state\n");
-				printf(" q   - Quit example\n");
-				printf(" s   - Print driver stats\n");
-				printf(" t   - time-code, generate tick-in\n");
-				printf(" x   - Transmit one packet\n");
-				printf("\nSYNTAX:\n");
-				printf(" cDEVNO run_clkdiv [startup_clkdiv]\n");
-				printf(" iDEVNO\n");
-				printf(" lDEVNO\n");
-				printf(" q\n");
-				printf(" sDEVNO\n");
-				printf(" tDEVNO [TIME-CODE]\n");
-				printf(" xDEVNO [PATH_0 .. PATH_N] NODE_ID\n");
-				break;
-
-			case 'q':
-			case 'Q':
-				printf("Quitting...\n");
-				quit = 1;
-				break;
-
-			case 't': /* time-code */
-			case 'T':
-				if (words[0][1] == '\0') {
-					printf(" T command need device number\n");
-					continue;
-				}
-				devno = atoi(&words[0][1]);
-				if (devno < 0 || devno >= nospw) {
-					printf(" Invalid device number\n");
-					continue;
-				}
-				if (word > 3) {
-					printf(" Invalid time-code\n");
-					continue;
-				}
-				/* If time-code specified set it */
-				if (word == 2) {
-					tc = strtoul(words[1], NULL, 0);
-					/* TimeCode incremented before transmission */
-					grspw_tc_time(devs[devno].dh, &tc);
-					printf(" T%d: time-code value now 0x%x\n",
-						devno, tc);
-				}
-				/* Generate Tick-In */
-				grspw_tc_tx(devs[devno].dh);
-				printf(" T%d: generated tick-in on GRSPW%d\n",
-					devno, devno);
-				break;
-
-			case 'x': /* xmit packet */
-			case 'X':
-				printf("***********  PKT TX/RX MODE  **************\n\n");
-
-				if (words[0][1] == '\0') {
-					//printf("Please choose a source port number : ");
-					printf(" X command need device number\n");
-					continue;
-				}
-
-				devno = atoi(&words[0][1]);
-
-				if (devno < 0 || devno >= nospw) {
-					printf(" Invalid device number\n");
-					continue;
-				}
-				if (word > 16 || word < 2) {
-					printf(" Invalid routing path\n");
-					continue;
-				}
-
-				memset(&route, 0, sizeof(route));
-				for (i = 1; i < word; i++)
-					route.dstadr[i - 1] = strtoul(words[i], NULL, 0);
-
-				src_port = route.dstadr[0];
-				if(route.dstadr[1]==0)
-					dest_port = src_port;
-				else
-					dest_port = route.dstadr[1];
-
-				printf("TX on GRSPW device %d (AMBA port %d)\n", devno, devno+1);
-				printf("SPW src port : %d\n", route.dstadr[0]);
-				printf("SPW dest port : %d\n", route.dstadr[1]);
-
-				/* Get a TX packet buffer */
-				rtems_semaphore_obtain(dma_sem, RTEMS_WAIT, RTEMS_NO_TIMEOUT);
-				pkt = devs[devno].tx_buf_list.head;
-				if (pkt == NULL) {
-					printf(" No free transmit buffers available\n");
-					continue;
-				}
-				devs[devno].tx_buf_list.head = pkt->next;
-				devs[devno].tx_buf_list_cnt--;
-				if (pkt->next == NULL)
-					devs[devno].tx_buf_list.tail = NULL;
-				pkt_init_hdr(pkt, &route, devno);
-
-				printf(" \nX%d: scheduling packet on GRSPW%d\n",
-					devno, devno);
-				/* Send packet by adding it to the tx_list */
-				grspw_list_append(&devs[devno].tx_list, pkt);
-				devs[devno].tx_list_cnt++;
-				rtems_semaphore_release(dma_sem);
-				break;
-		}
-		fflush(NULL);
+		/* Send packet by adding it to the tx_list */
+		grspw_list_append(&devs[devno].tx_list, pkt);
+		devs[devno].tx_list_cnt++;
+		rtems_semaphore_release(dma_sem);
 	}
 
 	tasks_stop = 1;
@@ -626,6 +494,7 @@ rtems_task test_app(rtems_task_argument ignored)
 
 	printf("\n\nEXAMPLE COMPLETED.\n\n");
 	exit(0);
+
 }
 
  /* Interrupt handler for TimeCode reception on RXDEV */
@@ -719,6 +588,15 @@ rtems_task dma_task(rtems_task_argument unused)
 	printf(" DMA task shutdown\n");
 
 	rtems_task_delete(RTEMS_SELF);
+
+	rtems_task_wake_after(8);
+	for ( i=0; i<nospw; i++)
+		dev_cleanup(i);
+	rtems_task_wake_after(8);
+
+	printf("\n\nEXAMPLE COMPLETED.\n\n");
+	exit(0);
+
 }
 
 int dma_process(struct grspw_device *dev)
@@ -747,6 +625,7 @@ int dma_process(struct grspw_device *dev)
 	dma_RX(dev);
 
 	dma_TX(dev);
+
 
 	return 0;
 
