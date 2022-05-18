@@ -113,7 +113,7 @@ void init_pkts(struct grspw_device *devs, struct spwpkt pkts[DEVS_MAX][DATA_MAX]
 int dma_RX(struct grspw_device *dev)
 {
 
-	int cnt, rc, i;
+	int cnt, rc;
 	struct grspw_list lst;
 	struct grspw_pkt *pkt;
 	unsigned char *c;
