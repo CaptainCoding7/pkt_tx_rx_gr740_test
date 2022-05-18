@@ -384,6 +384,7 @@ rtems_task test_app(rtems_task_argument ignored)
 
 	int src_port, dest_port;
 	int devno;
+	int pkt_cnt=0;
 
 	/* Initialize two GRSPW AMBA ports */
 	printf("Setting up SpaceWire router\n");
@@ -439,7 +440,7 @@ rtems_task test_app(rtems_task_argument ignored)
 
 	printf("\n***********  PKT TX/RX TEST  **************\n\n");
 
-	devno = -1;
+	//devno = -1;
 	src_port = 3;
 	dest_port = 6;
 	/// The number of packets to transmit
@@ -451,18 +452,20 @@ rtems_task test_app(rtems_task_argument ignored)
 
 	printf("SPW src port : %d\n", route.dstadr[0]);
 	printf("SPW dest port : %d\n", route.dstadr[1]);
-	printf("%d pkts are waiting for transmission\n", nb_pkts_to_transmit);
+	printf("%d pkts are waiting for transmission\n\n", nb_pkts_to_transmit);
 
 
 	while(nb_pkts_to_transmit!=0)
 	{
 
-		// the device used is changed as a new packet is sent
-		//devno = nb_pkts_to_transmit%4;
-		devno++;
-		printf("TX on GRSPW device %d (AMBA port %d)\n", devno, devno+1);
+		rtems_task_wake_after(1000);
 
-		rtems_task_wake_after(100);
+		// the device used is changed as a new packet is sent
+		devno = nb_pkts_to_transmit%4;
+		//devno++;
+		pkt_cnt++;
+		printf("------ PKT %d ------\n-------------------\n", pkt_cnt);
+		printf("TX on GRSPW device %d (AMBA port %d)\n", devno, devno+1);
 
 		/* Get a TX packet buffer */
 		rtems_semaphore_obtain(dma_sem, RTEMS_WAIT, RTEMS_NO_TIMEOUT);
@@ -476,8 +479,6 @@ rtems_task test_app(rtems_task_argument ignored)
 			devs[devno].tx_buf_list.tail = NULL;
 		pkt_init_hdr(pkt, &route, devno);
 
-		printf(" \nX%d: scheduling packet on GRSPW%d\n\n",
-			devno, devno);
 		nb_pkts_to_transmit--;
 
 		/* Send packet by adding it to the tx_list */
@@ -486,8 +487,8 @@ rtems_task test_app(rtems_task_argument ignored)
 		rtems_semaphore_release(dma_sem);
 	}
 
+	rtems_task_wake_after(1000);
 	tasks_stop = 1;
-	rtems_task_wake_after(8);
 	for ( i=0; i<nospw; i++)
 		dev_cleanup(i);
 	rtems_task_wake_after(8);
@@ -588,14 +589,6 @@ rtems_task dma_task(rtems_task_argument unused)
 	printf(" DMA task shutdown\n");
 
 	rtems_task_delete(RTEMS_SELF);
-
-	rtems_task_wake_after(8);
-	for ( i=0; i<nospw; i++)
-		dev_cleanup(i);
-	rtems_task_wake_after(8);
-
-	printf("\n\nEXAMPLE COMPLETED.\n\n");
-	exit(0);
 
 }
 

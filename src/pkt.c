@@ -64,8 +64,8 @@ void init_pkts(struct grspw_device *devs, struct spwpkt pkts[DEVS_MAX][DATA_MAX]
 	for (i = 0; i < DEVS_MAX; i++) {
 
 		init_pkt_data(decs, word_test[i]);
-		for(int i=0;i<4;i++)
-			printf("%d\n",decs[i]);
+		//for(int i=0;i<4;i++)
+			//printf("%d\n",decs[i]);
 
 		grspw_list_clr(&devs[i].rx_list);
 		grspw_list_clr(&devs[i].tx_list);
