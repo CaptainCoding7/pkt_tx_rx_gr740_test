@@ -18,10 +18,11 @@
 #include <grlib/grspw_pkt.h>
 #include "grspw_pkt_lib.h"
 
-#define DEVS_MAX 32
+#define DEVS_MAX 4 // 32
 #define PKT_SIZE 32
 #define DATA_MAX 136 //120 + 16
-/* SpaceWire parameters */
+
+/* Protocol ID */
 #define SPW_PROT_ID 155
 
 

@@ -52,17 +52,21 @@ void init_pkts(struct grspw_device *devs, struct spwpkt pkts[DEVS_MAX][DATA_MAX]
 	int i, j;
 
 	int decs[4];
-	char *word_test1 = "DEADFACE";
-	char *word_test2 = "BEAUCADEAU";
-	init_pkt_data(decs, word_test1);
+	char *word_test[DEVS_MAX];
 
-	for(int i=0;i<4;i++)
-		printf("%d\n",decs[i]);
+	word_test[0] = "DEADFACE";
+	word_test[1] = "CAFEFADE";
+	word_test[2] = "BEAUCADE";
+	word_test[3] = "ACE0FCEA";
 
 	memset(&pkts[0][0], 0, sizeof(pkts));
 
-	//for (i = 0; i < DEVS_MAX; i++) {
-	for (i = 0; i < 4; i++) {
+	for (i = 0; i < DEVS_MAX; i++) {
+
+		init_pkt_data(decs, word_test[i]);
+		for(int i=0;i<4;i++)
+			printf("%d\n",decs[i]);
+
 		grspw_list_clr(&devs[i].rx_list);
 		grspw_list_clr(&devs[i].tx_list);
 		grspw_list_clr(&devs[i].tx_buf_list);
