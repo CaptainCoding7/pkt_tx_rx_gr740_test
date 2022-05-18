@@ -213,7 +213,7 @@ int dma_TX(struct grspw_device *dev)
 				dev->tx_list_cnt);
 			for (pkt = dev->tx_list.head; pkt; pkt = pkt->next) {
 				printf(" PKT of length %d bytes: ", pkt->hlen+pkt->dlen);
-				for (i = 0; i < pkt->hlen+pkt->dlen && i < 8; i++) {
+				for (i = 0; i < pkt->hlen+pkt->dlen /*&& i < 8*/; i++) {
 					if (i < pkt->hlen)
 						c = i + (unsigned char *)pkt->hdr;
 					else

@@ -10,7 +10,13 @@
 
 static struct grspw_device devs[DEVS_MAX];
 
-void app_tc_isr(void *data, int tc);
+/* Interrupt handler for TimeCode reception on RXDEV */
+void app_tc_isr(void *data, int tc)
+{
+	struct grspw_device *dev = data;
+
+	printk("GRSPW%d: TC-ISR received 0x%02x\n", dev->index, tc);
+}
 
 
 struct grspw_config dev_def_cfg =

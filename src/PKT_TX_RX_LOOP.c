@@ -1,14 +1,9 @@
 /*
- * RTEMS SpaceWire packet library demonstration application. The example
- * takes commands from STDIN and generates SpaceWire packets with the path
- * or logical address the user specififes. If a on-chip router is found
- * the routing table will be set up as described in the README file, you
- * can also see a console log from a typical execution in the README file.
+ * A simple program to send and receive packets on spacewire ports.
  *
  * The application consists of three threads:
  *
- *  TA01. Input task, the user commands from STDIN are interpreted into
- *        packet scheduling, time-code generation or status printing.
+ *  TA01. Packet scheduling task
  *
  *  TA02. Link monitor task. Prints out whenever a SpaceWire link switch
  *        from run-state to any other state or vice versa.
@@ -115,17 +110,93 @@ rtems_task Init( rtems_task_argument argument);	/* forward declaration needed */
 #include <unistd.h>
 #include <fcntl.h>
 
+#include "/opt/rcc-1.3.1-gcc/src/samples/config.c"
+
+#include <grlib/grspw_router.h>
+
+#include "pkt.h"
+#include "dev.h"
+
 #undef ENABLE_NETWORK
 #undef ENABLE_NETWORK_SMC_LEON3
 
-#include "/opt/rcc-1.3.1-gcc/src/samples/config.c"
-
+/* Forward declarations */
 rtems_task test_app(rtems_task_argument ignored);
+rtems_task link_ctrl_task(rtems_task_argument unused);
+rtems_task dma_task(rtems_task_argument unused);
+int dma_process(struct grspw_device *dev);
+extern int router_setup_custom(void);
+extern int router_print_port_status(void);
+
+/* Variables */
 rtems_id tid, tid_link, tid_dma;
 rtems_id dma_sem;
-
 int nospw = 0;
 int tasks_stop = 0;
+// All packet buffers used by application :
+struct spwpkt pkts[DEVS_MAX][DATA_MAX];
+// Router:
+extern struct router_hw_info router_hw;
+extern void *router;
+int router_present = 0;
+
+/***********************************************/
+
+/*
+ * A function to initialize the router and the GRSPW cores
+ */
+void init_router()
+{
+
+	int i;
+
+/* Initialize two GRSPW AMBA ports */
+	printf("Setting up SpaceWire router\n");
+	if (router_setup_custom()) {
+		printf("Failed router initialization, assuming that it does not exists\n");
+	} else {
+		/* on-chip router found */
+		if (router_hw.nports_amba < 2) {
+			printf("Error. Router with less than 2 AMBA ports not supported\n");
+			exit(0);
+		}
+		router_present = 1;
+	}
+
+	nospw = grspw_dev_count();
+	if (nospw < 1) {
+		printf("Found no SpaceWire cores, aborting\n");
+		exit(0);
+	}
+	if (nospw > DEVS_MAX) {
+		printf("Limiting to %d SpaceWire devices\n", DEVS_MAX);
+		nospw = DEVS_MAX;
+	}
+
+	memset(devs, 0, sizeof(devs));
+	for (i=0; i<nospw; i++) {
+		if (dev_init(i)) {
+			printf("Failed to initialize GRSPW%d\n", i);
+			exit(0);
+		}
+		fflush(NULL);
+	}
+
+	printf("\n\nStarting SpW DMA channels\n");
+	for (i = 0; i < nospw; i++) {
+		printf("Starting GRSPW%d: ", i);
+		fflush(NULL);
+		if (grspw_start(DEV(&devs[i]))) {
+			printf("Failed to initialize GRSPW%d\n", i);
+			exit(0);
+		}
+		printf("DMA Started Successfully\n");
+	}
+
+	fflush(NULL);
+}
+
+/**-------------------------- INIT TASK --------------------------**/
 
 rtems_task Init(
   rtems_task_argument ignored
@@ -166,70 +237,7 @@ rtems_task Init(
 	rtems_task_suspend( RTEMS_SELF );
 }
 
-//#include <grlib/grspw_pkt.h>
-//#include "grspw_pkt_lib.h"
-
-
-rtems_task link_ctrl_task(rtems_task_argument unused);
-rtems_task dma_task(rtems_task_argument unused);
-
-#include "pkt.h"
-#include "dev.h"
-
-/* All packet buffers used by application */
-struct spwpkt pkts[DEVS_MAX][DATA_MAX];
-
-
- extern int router_setup_custom(void);
- extern int router_print_port_status(void);
-
-
-#include <grlib/grspw_router.h>
-extern struct router_hw_info router_hw;
-extern void *router;
-int router_present = 0;
-
-
-void init_router()
-{
-
-	int i;
-
-/* Initialize two GRSPW AMBA ports */
-	printf("Setting up SpaceWire router\n");
-	if (router_setup_custom()) {
-		printf("Failed router initialization, assuming that it does not exists\n");
-	} else {
-		/* on-chip router found */
-		if (router_hw.nports_amba < 2) {
-			printf("Error. Router with less than 2 AMBA ports not supported\n");
-			exit(0);
-		}
-		router_present = 1;
-	}
-
-	nospw = grspw_dev_count();
-	if (nospw < 1) {
-		printf("Found no SpaceWire cores, aborting\n");
-		exit(0);
-	}
-	if (nospw > DEVS_MAX) {
-		printf("Limiting to %d SpaceWire devices\n", DEVS_MAX);
-		nospw = DEVS_MAX;
-	}
-
-	memset(devs, 0, sizeof(devs));
-	for (i=0; i<nospw; i++) {
-		if (dev_init(i)) {
-			printf("Failed to initialize GRSPW%d\n", i);
-			exit(0);
-		}
-		fflush(NULL);
-	}
-}
-
-
-int dma_process(struct grspw_device *dev);
+/*************************  TEST APP TASK  *******************************/
 
 rtems_task test_app(rtems_task_argument ignored)
 {
@@ -247,18 +255,6 @@ rtems_task test_app(rtems_task_argument ignored)
 	/* Initialize packets */
 	init_pkts(devs, pkts);
 
-	printf("\n\nStarting SpW DMA channels\n");
-	for (i = 0; i < nospw; i++) {
-		printf("Starting GRSPW%d: ", i);
-		fflush(NULL);
-		if (grspw_start(DEV(&devs[i]))) {
-			printf("Failed to initialize GRSPW%d\n", i);
-			exit(0);
-		}
-		printf("DMA Started Successfully\n");
-	}
-
-	fflush(NULL);
 	rtems_task_start(tid_link, link_ctrl_task, 0);
 	rtems_task_start(tid_dma, dma_task, 0);
 	rtems_task_wake_after(12);
@@ -284,7 +280,7 @@ rtems_task test_app(rtems_task_argument ignored)
 	while(nb_pkts_to_transmit!=0)
 	{
 
-		rtems_task_wake_after(1000);
+		rtems_task_wake_after(500);
 
 		pkt_cnt++;
 		printf("------ PKT %d ------\n-------------------\n", pkt_cnt);
@@ -313,7 +309,7 @@ rtems_task test_app(rtems_task_argument ignored)
 		rtems_semaphore_release(dma_sem);
 	}
 
-	rtems_task_wake_after(1000);
+	rtems_task_wake_after(500);
 	tasks_stop = 1;
 	for ( i=0; i<nospw; i++)
 		dev_cleanup(i);
@@ -324,13 +320,6 @@ rtems_task test_app(rtems_task_argument ignored)
 
 }
 
- /* Interrupt handler for TimeCode reception on RXDEV */
- void app_tc_isr(void *data, int tc)
- {
- 	struct grspw_device *dev = data;
-
- 	printk("GRSPW%d: TC-ISR received 0x%02x\n", dev->index, tc);
- }
 
 /**************************************************************************/
 
